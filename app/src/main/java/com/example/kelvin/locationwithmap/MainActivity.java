@@ -158,8 +158,8 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                 SensorManager.getOrientation(R,orientation);
 
                 azimuth = orientation[0] - geomagneticField.getDeclination();//Get direction phone is facing, adjusted
-                azimuth = (float)(azimuth * 180 / Math.PI);
-                
+                azimuth = (float)((azimuth * 180 / Math.PI) - 90.0);
+
             }
 
         }
