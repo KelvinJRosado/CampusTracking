@@ -152,6 +152,9 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 
             boolean worked = SensorManager.getRotationMatrix(R,I,gravity,magnet);
 
+            //Adjust x component of R
+            R[0] = -R[0];
+
             if(worked){
                 float [] orientation = new float[3];
 
@@ -167,7 +170,8 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         //If event is a step
         if(sensorEvent.sensor.getType() == Sensor.TYPE_STEP_DETECTOR) {
 
-            final double stepLength = 0.6604;//Average step length of an adult
+            //TODO: Get more accurate step length. 0.71628m is not enough
+            final double stepLength = 0.762;//Average step length of an adult, in meters
             LatLng lastLocation = userPath.get(userPath.size() - 1);
 
             //Get direction of movement
@@ -177,7 +181,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
             LatLng currentPos = SphericalUtil.computeOffset(lastLocation, stepLength, direction);
 
             //Draw a line between last and current positions
-            Polyline line = googleMap.addPolyline(new PolylineOptions().add(lastLocation, currentPos).width(15).color(Color.RED));
+            Polyline line = googleMap.addPolyline(new PolylineOptions().add(lastLocation, currentPos).width(25).color(Color.RED));
 
             userPath.add(currentPos);
 
