@@ -1,6 +1,7 @@
 package com.example.kelvin.locationwithmap;
 
 import android.Manifest;
+import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.hardware.GeomagneticField;
@@ -9,13 +10,21 @@ import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
 import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.widget.Toast;
 
 import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationCallback;
+import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationResult;
 import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.location.LocationSettingsRequest;
+import com.google.android.gms.location.LocationSettingsResponse;
+import com.google.android.gms.location.SettingsClient;
 import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
@@ -25,6 +34,7 @@ import com.google.android.gms.maps.model.MarkerOptions;
 import com.google.android.gms.maps.model.Polyline;
 import com.google.android.gms.maps.model.PolylineOptions;
 import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.android.gms.tasks.Task;
 import com.google.maps.android.SphericalUtil;
 
 import java.util.ArrayList;
@@ -43,16 +53,33 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     private FusedLocationProviderClient fusedLocationProviderClient;//Gets starting location
     private GoogleMap googleMap;//Reference to map
 
+    //Reference to context
+    Context thisContext = this;
+
     //Sensors
     private SensorManager sensorManager;
-    private Sensor stepSensor, magnetSensor, accelSensor;
+    private Sensor stepSensor;
 
-    //Gravity and rotation info
-    private float[] gravity, magnet;
-    GeomagneticField geomagneticField;
+    //Gravity and rotation info; Used for calculating orientation
+    private Sensor accelSensor, magnetSensor;
+    private float [] lastAccel = new float[3];
+    private float [] lastMagnet = new float[3];
+    private boolean accelSet = false, magnetSet = false;
+    private float [] rotation = new float[9];
+    private float [] orientation = new float[3];
+    float currentAngle = 0f;
+
+    private GeomagneticField geomagneticField;
 
     private ArrayList<LatLng> userPath;
-    private float azimuth = 0;
+
+    //Old location; Used for calculating step length
+    private LocationRequest locationRequest;
+    private LocationCallback locationCallback;
+    private Location oldLocation;
+    private long oldTime;
+    private int stepsTaken = 1;
+    double stepLength = 0.762;//Default step length to average
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -101,14 +128,19 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                     geomagneticField = new GeomagneticField((float)location.getLatitude(),
                             (float)location.getLatitude(),(float)location.getAltitude(),System.currentTimeMillis());
 
+                    //Initialize starting location info
+                    oldTime = System.currentTimeMillis();
+                    oldLocation = location;
+
+                }
+                else {
+                    //Show AUS if location not found
+                    LatLng sydney = new LatLng(-33.852,151.211);
+                    googleMap.addMarker(new MarkerOptions().position(sydney).title("Location not found so here's Australia"));
+                    googleMap.moveCamera(CameraUpdateFactory.newLatLng(sydney));
                 }
             }
         });
-
-        //Show AUS if location not found
-        LatLng sydney = new LatLng(-33.852,151.211);
-        googleMap.addMarker(new MarkerOptions().position(sydney).title("Location not found so here's Australia"));
-        googleMap.moveCamera(CameraUpdateFactory.newLatLng(sydney));
 
     }
 
@@ -125,57 +157,111 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         magnetSensor = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
         accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
 
+        //Location Updates; Done every new location; Recalculate step length
+        locationCallback = new LocationCallback(){
+            @Override
+            public void onLocationResult(LocationResult locationResult){
+                //Get current location
+                Location newLocation = locationResult.getLastLocation();
+
+                //Get time taken to travel interval
+                double timeTaken = (System.currentTimeMillis() - oldTime) / 1000.0;
+
+                LatLng old = new LatLng(oldLocation.getLatitude(),oldLocation.getLongitude());
+                LatLng now = new LatLng(newLocation.getLatitude(),newLocation.getLongitude());
+
+                //Get meters travelled in interval
+                double distance = SphericalUtil.computeDistanceBetween(old,now);
+
+                //Verify accuracy; Check that speed (m/s) is around average of 1.39
+                if(distance / timeTaken > 1.6) {
+
+                    //Get average length per step
+                    stepLength = ((distance / (double) stepsTaken) + stepLength) / 2;
+
+                    String ss = "Steps taken: " + stepsTaken + "\n"
+                            + "Meters travelled: " + distance + "\n"
+                            + "Meters / Step: " + stepLength;
+
+                    //Reset variables
+                    oldTime = System.currentTimeMillis();
+                    stepsTaken = 1;
+                    oldLocation = newLocation;
+                }
+
+            }
+        };
+
+        locationRequest = new LocationRequest();
+        locationRequest.setInterval(5000);//Every 5 seconds
+        locationRequest.setFastestInterval(5000);
+        locationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
+
+        LocationSettingsRequest.Builder builder = new LocationSettingsRequest.Builder().addLocationRequest(locationRequest);
+        SettingsClient client = LocationServices.getSettingsClient(this);
+        Task<LocationSettingsResponse> task = client.checkLocationSettings(builder.build());
+
+        if (ActivityCompat.checkSelfPermission(this, ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+
+            ActivityCompat.requestPermissions(this,new String[]{ACCESS_FINE_LOCATION}, PackageManager.PERMISSION_GRANTED);
+
+        }
+        fusedLocationProviderClient.requestLocationUpdates(locationRequest,locationCallback,null);
+
+    }
+
+    protected void onResume(){
+        super.onResume();
+
         //Register sensor listeners
         sensorManager.registerListener(this,stepSensor, SensorManager.SENSOR_DELAY_NORMAL);
         sensorManager.registerListener(this,magnetSensor,SensorManager.SENSOR_DELAY_NORMAL);
         sensorManager.registerListener(this,accelSensor,SensorManager.SENSOR_DELAY_NORMAL);
+    }
 
+    protected void onPause(){
+        super.onPause();
+        sensorManager.unregisterListener(this,stepSensor);
+        sensorManager.unregisterListener(this,accelSensor);
+        sensorManager.unregisterListener(this,magnetSensor);
     }
 
     @Override
-    public void onSensorChanged(SensorEvent sensorEvent) {
+    public void onSensorChanged(SensorEvent event) {
 
         //Accel sensor
-        if(sensorEvent.sensor.getType() == Sensor.TYPE_ACCELEROMETER){
-            gravity = sensorEvent.values;
+        if(event.sensor == accelSensor){
+            lastAccel = event.values;
+            accelSet = true;
         }
 
         //Magnet sensor
-        if(sensorEvent.sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD){
-            magnet = sensorEvent.values;
+        else if(event.sensor == magnetSensor){
+            lastMagnet = event.values;
+            magnetSet = true;
         }
 
         //Get orientation of phone
-        if(gravity != null && magnet != null && geomagneticField != null){
-            float [] R = new float[9];
-            float [] I = new float[9];
+        if(accelSet && magnetSet ){
 
-            boolean worked = SensorManager.getRotationMatrix(R,I,gravity,magnet);
+            SensorManager.getRotationMatrix(rotation,null,lastAccel,lastMagnet);
+            SensorManager.getOrientation(rotation,orientation);
 
-            //Adjust x component of R
-            R[0] = -R[0];
-
-            if(worked){
-                float [] orientation = new float[3];
-
-                SensorManager.getOrientation(R,orientation);
-
-                azimuth = orientation[0] - geomagneticField.getDeclination();//Get direction phone is facing, adjusted
-                azimuth = (float)((azimuth * 180 / Math.PI) - 90.0);
-
-            }
+            float azimuthRadians = orientation[0];
+            currentAngle = ((float)(Math.toDegrees(azimuthRadians) + 360) % 360) - geomagneticField.getDeclination();
 
         }
 
         //If event is a step
-        if(sensorEvent.sensor.getType() == Sensor.TYPE_STEP_DETECTOR) {
+        if(event.sensor == stepSensor) {
 
-            //TODO: Get more accurate step length. 0.71628m is not enough
-            final double stepLength = 0.762;//Average step length of an adult, in meters
+            //Inrement counter
+            stepsTaken++;
+
             LatLng lastLocation = userPath.get(userPath.size() - 1);
 
             //Get direction of movement
-            double direction = azimuth;
+            double direction = currentAngle;
 
             //Calculate new LatLng
             LatLng currentPos = SphericalUtil.computeOffset(lastLocation, stepLength, direction);
@@ -193,4 +279,5 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     public void onAccuracyChanged(Sensor sensor, int i) {
         //Do nothing
     }
+
 }
