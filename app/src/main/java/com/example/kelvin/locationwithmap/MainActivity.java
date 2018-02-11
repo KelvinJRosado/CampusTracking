@@ -77,9 +77,10 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     private LocationRequest locationRequest;
     private LocationCallback locationCallback;
     private Location oldLocation;
-    private long oldTime;
+    private long oldTime = System.currentTimeMillis();
     private int stepsTaken = 1;
-    double stepLength = 0.762;//Default step length to average
+    private double stepLength = 0.762;//Default step length to average
+    private int stepUpdateCount = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -161,32 +162,37 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         locationCallback = new LocationCallback(){
             @Override
             public void onLocationResult(LocationResult locationResult){
-                //Get current location
-                Location newLocation = locationResult.getLastLocation();
 
-                //Get time taken to travel interval
-                double timeTaken = (System.currentTimeMillis() - oldTime) / 1000.0;
+                if(oldLocation != null) {
 
-                LatLng old = new LatLng(oldLocation.getLatitude(),oldLocation.getLongitude());
-                LatLng now = new LatLng(newLocation.getLatitude(),newLocation.getLongitude());
+                    //Get current location
+                    Location newLocation = locationResult.getLastLocation();
 
-                //Get meters travelled in interval
-                double distance = SphericalUtil.computeDistanceBetween(old,now);
+                    //Get time taken to travel interval
+                    double timeTaken = (System.currentTimeMillis() - oldTime) / 1000.0;
 
-                //Verify accuracy; Check that speed (m/s) is around average of 1.39
-                if(distance / timeTaken > 1.6) {
+                    LatLng old = new LatLng(oldLocation.getLatitude(), oldLocation.getLongitude());
+                    LatLng now = new LatLng(newLocation.getLatitude(), newLocation.getLongitude());
 
-                    //Get average length per step
-                    stepLength = ((distance / (double) stepsTaken) + stepLength) / 2;
+                    //Get meters travelled in interval
+                    double distance = SphericalUtil.computeDistanceBetween(old, now);
 
-                    String ss = "Steps taken: " + stepsTaken + "\n"
-                            + "Meters travelled: " + distance + "\n"
-                            + "Meters / Step: " + stepLength;
+                    //Verify accuracy; Check that speed (m/s) is around average of 1.39
+                    if (distance / timeTaken > 1.6) {
 
-                    //Reset variables
-                    oldTime = System.currentTimeMillis();
-                    stepsTaken = 1;
-                    oldLocation = newLocation;
+                        //Get average length per step
+                        stepLength = ((distance / (double) stepsTaken) + stepLength) / ++stepUpdateCount;
+
+                        String ss = "Steps taken: " + stepsTaken + "\n"
+                                + "Meters travelled: " + distance + "\n"
+                                + "Meters / Step: " + stepLength;
+
+                        //Reset variables
+                        oldTime = System.currentTimeMillis();
+                        stepsTaken = 1;
+                        oldLocation = newLocation;
+                    }
+
                 }
 
             }
@@ -242,7 +248,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         }
 
         //Get orientation of phone
-        if(accelSet && magnetSet ){
+        if(accelSet && magnetSet && geomagneticField != null){
 
             SensorManager.getRotationMatrix(rotation,null,lastAccel,lastMagnet);
             SensorManager.getOrientation(rotation,orientation);
