@@ -192,7 +192,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         }
 
         //If event is a step
-        if(event.sensor == stepSensor) {
+        if(event.sensor == stepSensor || userPath.size() >= 1) {
 
             LatLng lastLocation = userPath.get(userPath.size() - 1);
 
