@@ -73,14 +73,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 
     private ArrayList<LatLng> userPath;
 
-    //Old location; Used for calculating step length
-    private LocationRequest locationRequest;
-    private LocationCallback locationCallback;
-    private Location oldLocation;
-    private long oldTime = System.currentTimeMillis();
-    private int stepsTaken = 1;
-    private double stepLength = 0.762;//Default step length to average
-    private int stepUpdateCount = 0;
+    private double stepLength = 0.762;//Default step length
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -129,10 +122,6 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                     geomagneticField = new GeomagneticField((float)location.getLatitude(),
                             (float)location.getLatitude(),(float)location.getAltitude(),System.currentTimeMillis());
 
-                    //Initialize starting location info
-                    oldTime = System.currentTimeMillis();
-                    oldLocation = location;
-
                 }
                 else {
                     //Show AUS if location not found
@@ -157,62 +146,6 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         stepSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR);
         magnetSensor = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
         accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
-
-        //Location Updates; Done every new location; Recalculate step length
-        locationCallback = new LocationCallback(){
-            @Override
-            public void onLocationResult(LocationResult locationResult){
-
-                if(oldLocation != null) {
-
-                    //Get current location
-                    Location newLocation = locationResult.getLastLocation();
-
-                    //Get time taken to travel interval
-                    double timeTaken = (System.currentTimeMillis() - oldTime) / 1000.0;
-
-                    LatLng old = new LatLng(oldLocation.getLatitude(), oldLocation.getLongitude());
-                    LatLng now = new LatLng(newLocation.getLatitude(), newLocation.getLongitude());
-
-                    //Get meters travelled in interval
-                    double distance = SphericalUtil.computeDistanceBetween(old, now);
-
-                    //Verify accuracy; Check that speed (m/s) is around average of 1.39
-                    if (distance / timeTaken > 1.6) {
-
-                        //Get average length per step
-                        stepLength = ((distance / (double) stepsTaken) + stepLength) / ++stepUpdateCount;
-
-                        String ss = "Steps taken: " + stepsTaken + "\n"
-                                + "Meters travelled: " + distance + "\n"
-                                + "Meters / Step: " + stepLength;
-
-                        //Reset variables
-                        oldTime = System.currentTimeMillis();
-                        stepsTaken = 1;
-                        oldLocation = newLocation;
-                    }
-
-                }
-
-            }
-        };
-
-        locationRequest = new LocationRequest();
-        locationRequest.setInterval(5000);//Every 5 seconds
-        locationRequest.setFastestInterval(5000);
-        locationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
-
-        LocationSettingsRequest.Builder builder = new LocationSettingsRequest.Builder().addLocationRequest(locationRequest);
-        SettingsClient client = LocationServices.getSettingsClient(this);
-        Task<LocationSettingsResponse> task = client.checkLocationSettings(builder.build());
-
-        if (ActivityCompat.checkSelfPermission(this, ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-
-            ActivityCompat.requestPermissions(this,new String[]{ACCESS_FINE_LOCATION}, PackageManager.PERMISSION_GRANTED);
-
-        }
-        fusedLocationProviderClient.requestLocationUpdates(locationRequest,locationCallback,null);
 
     }
 
@@ -261,13 +194,36 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         //If event is a step
         if(event.sensor == stepSensor) {
 
-            //Inrement counter
-            stepsTaken++;
-
             LatLng lastLocation = userPath.get(userPath.size() - 1);
 
-            //Get direction of movement
+            //Get direction of movement, in degrees East of North
             double direction = currentAngle;
+
+            //Adjust angle based on phone's rotation
+            double x = lastAccel[0];
+            double y = lastAccel[1];
+            double z = lastAccel[2];
+
+            double xFactor = 0;
+            double yFactor = 0;
+            double zFactor = 0;
+
+            //X is rotated
+            if(x > 0.5 || x < -0.5){
+                xFactor = (x / 9.8) * 1;
+            }
+
+            //Y is rotated
+            if(y > 0.5 || y < -0.5){
+                yFactor = (y / 9.8) * 30;
+            }
+
+            //Z is rotated
+            if(z > 0.5 || z < -0.5){
+                zFactor = (z / 9.8) * 1;
+            }
+
+            direction = direction + xFactor + yFactor + zFactor;
 
             //Calculate new LatLng
             LatLng currentPos = SphericalUtil.computeOffset(lastLocation, stepLength, direction);
