@@ -45,8 +45,8 @@ import static android.Manifest.permission.ACCESS_FINE_LOCATION;
 public class MainActivity extends AppCompatActivity implements OnMapReadyCallback, SensorEventListener {
     /*
     References
-    http://www.codingforandroid.com/2011/01/using-orientation-sensors-simple.html
-
+    [1] http://www.codingforandroid.com/2011/01/using-orientation-sensors-simple.html
+    [2] https://www.built.io/blog/applying-low-pass-filter-to-android-sensor-s-readings
     */
 
     //Map API
@@ -67,13 +67,14 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     private boolean accelSet = false, magnetSet = false;
     private float [] rotation = new float[9];
     private float [] orientation = new float[3];
-    float currentAngle = 0f;
+    private float currentAngle = 0f;
+    private final float ALPHA = (float)0.25;
 
     private GeomagneticField geomagneticField;
 
     private ArrayList<LatLng> userPath;
 
-    private double stepLength = 0.762;//Default step length
+    private double stepLength = 0.6923532;//My average step length
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -149,6 +150,20 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 
     }
 
+    //Filters sensor data to improve accuracy
+    //Based on code from [2]
+    protected float[] filter(float[] in, float[] out){
+
+        if(out == null) return in;
+
+        for(int i = 0; i < in.length; i++){
+            out[i] = out[i] + (ALPHA * (in[i] - out[i]));
+        }
+
+        return out;
+
+    }
+
     protected void onResume(){
         super.onResume();
 
@@ -170,13 +185,13 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 
         //Accel sensor
         if(event.sensor == accelSensor){
-            lastAccel = event.values;
+            lastAccel = filter(event.values.clone(), lastAccel);
             accelSet = true;
         }
 
         //Magnet sensor
         else if(event.sensor == magnetSensor){
-            lastMagnet = event.values;
+            lastMagnet = filter(event.values.clone(), lastMagnet);
             magnetSet = true;
         }
 
@@ -192,38 +207,12 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         }
 
         //If event is a step
-        if(event.sensor == stepSensor || userPath.size() >= 1) {
+        if(event.sensor == stepSensor && userPath.size() >= 1) {
 
             LatLng lastLocation = userPath.get(userPath.size() - 1);
 
             //Get direction of movement, in degrees East of North
             double direction = currentAngle;
-
-            //Adjust angle based on phone's rotation
-            double x = lastAccel[0];
-            double y = lastAccel[1];
-            double z = lastAccel[2];
-
-            double xFactor = 0;
-            double yFactor = 0;
-            double zFactor = 0;
-
-            //X is rotated
-            if(x > 0.5 || x < -0.5){
-                xFactor = (x / 9.8) * 1;
-            }
-
-            //Y is rotated
-            if(y > 0.5 || y < -0.5){
-                yFactor = (y / 9.8) * 30;
-            }
-
-            //Z is rotated
-            if(z > 0.5 || z < -0.5){
-                zFactor = (z / 9.8) * 1;
-            }
-
-            direction = direction + xFactor + yFactor + zFactor;
 
             //Calculate new LatLng
             LatLng currentPos = SphericalUtil.computeOffset(lastLocation, stepLength, direction);
